@@ -22,6 +22,7 @@
 #----------------------------------------------------------------------
 
 
+import numpy as np
 import time
 # Imports for GPIO manipulation
 import spidev
@@ -118,19 +119,25 @@ class SSD1351:
         # SPI port configuration
         self.spi = spidev.SpiDev()
         self.spi.open(bus, device)
+        self.spi.max_speed_hz = 8000000 #We set the bus to 8Mhz
         self.spi.mode = 3 # necessary!
-        # GPIO port configuration. (The def)
+        # GPIO port configuration. (The defition is at the start of the code)
         self.gpio = GPIO()
         self.gpio.setup(self.reset_pin, self.gpio.OUT)
         self.gpio.output(self.reset_pin, self.gpio.HIGH)
         self.gpio.setup(self.dc_pin, self.gpio.OUT)
         self.gpio.output(self.dc_pin, self.gpio.LOW)
-        # Cargamos el archivo con la fuente
+        # Load de font
         self.font = glcdfont.font5x8[:]    #We make a copy
         self.font_size_x = glcdfont.x_size
         self.font_size_y = glcdfont.y_size
         self.cursor_x = 0
         self.cursor_y = 0
+        #Frame buffer for speed optimization
+        self.frame_buffer = np.full((128,128),0,dtype=np.uint16)
+        #Toogle switch for speed optimization
+        self.optimization = False #Becomes True in the begin() function
+
 
     # Reset display
     def reset(self):
@@ -225,6 +232,10 @@ class SSD1351:
 
         self.writeCommand(self.CMD_DISPLAYON)         #--turn on oled panel
 
+        #Now we take the chance to clean the screen
+        self.fillScreen(0)
+        self.frame_buffer = np.full((128,128),0,dtype=np.uint16)
+        self.optimization = True
 
     #Invert the display... whatever that means.
     def invert(self, v):   # v is a boolean
@@ -267,6 +278,7 @@ class SSD1351:
         self.writeCommand(self.CMD_WRITERAM)
 
 
+
     def color565(self, (colorRGB)): # ints
         r,g,b = colorRGB
         c = r >> 3
@@ -275,7 +287,6 @@ class SSD1351:
         c <<= 5
         c |= b >> 3
         return c
-
 
 
     def fillScreen(self, fillcolor): # int
@@ -294,6 +305,27 @@ class SSD1351:
         if x+w > self.SSD1351WIDTH:
             w = self.SSD1351WIDTH - x - 1
 
+        #Check if optimization is actually convinient
+        if self.optimization:
+            total_pixels = float(w*h)
+            time_normal = total_pixels/3649.0       #3649 pixels/sec  is the Normal speed of the fillRect function
+            painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x:x+w ,y:y+h],return_counts=True)).T  if fillcolor in tt]
+            if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
+            else: painted_pixels = painted_pixels[0][1]
+            pixels_to_paint = total_pixels - painted_pixels
+            time_pixelated = float(pixels_to_paint)/874.0 #874 pixels/sec  is the Normal speed of the drawPixel function
+            print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
+            if time_pixelated < time_normal:
+                print "pixelado!"
+                [self.drawPixel(x1,y1,fillcolor) for x1 in range(x,x+w) for y1 in range(y,y+h)]
+
+                #Escribimos en el frame_buffer
+                block = np.full((w,h),fillcolor)
+                self.frame_buffer[x:x+w ,y:y+h] = block
+                return
+
+
+        print "normal!"
         # set location
         self.writeCommand(self.CMD_SETCOLUMN)
         self.writeData(x)
@@ -304,9 +336,15 @@ class SSD1351:
         # fill!
         self.writeCommand(self.CMD_WRITERAM)
 
-        for i in range(w*h):                                ##### Quizas se puede mejorar con un map
+        for i in xrange(w*h):                                ##### Quizas se puede mejorar con un map
            self.writeData(fillcolor >> 8)
            self.writeData(fillcolor)
+
+        #Escribimos en el frame_buffer
+        block = np.full((w,h),fillcolor)
+        self.frame_buffer[x:x+w ,y:y+h] = block
+
+
 
 #This is necesary for the suppor with de GFX library
     def drawFastHLine(self, x, y, w, color):
@@ -319,6 +357,26 @@ class SSD1351:
             w = self.SSD1351WIDTH - x - 1
         if w < 0:
             return
+
+
+        #Check if optimization is actually convinient
+        if self.optimization:
+            total_pixels = float(w)
+            time_normal = total_pixels/3649.0       #3649 pixels/sec  is the Normal speed of the fillRect function
+            painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x:x+w ,y],return_counts=True)).T  if color in tt]
+            if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
+            else: painted_pixels = painted_pixels[0][1]
+            pixels_to_paint = total_pixels - painted_pixels
+            time_pixelated = float(pixels_to_paint)/874.0 #874 pixels/sec  is the Normal speed of the drawPixel function
+            # print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
+            if time_pixelated < time_normal:
+                print "pixelado!"
+                [self.drawPixel(x1,y,color) for x1 in range(x,x+w)]
+
+                #Escribimos en el frame_buffer
+                block = np.full((w,),color)
+                self.frame_buffer[x:x+w ,y] = block
+                return
 
         # set location
         self.writeCommand(self.CMD_SETCOLUMN)
@@ -334,6 +392,13 @@ class SSD1351:
            self.writeData(color >> 8)
            self.writeData(color)
 
+        #Escribimos en el frame_buffer
+        block = np.full((w,),color)
+        self.frame_buffer[x:x+w ,y] = block
+        return
+
+
+
 #This is also necesary for the support of the GFX libray
     def drawFastVLine(self, x, y, h, color):
         # Bounds check
@@ -345,6 +410,25 @@ class SSD1351:
             h = self.SSD1351HEIGHT - y - 1
         if h < 0:
             return
+
+        #Check if optimization is actually convinient
+        if self.optimization:
+            total_pixels = float(h)
+            time_normal = total_pixels/3649.0       #3649 pixels/sec  is the Normal speed of the fillRect function
+            painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x,y:y+h],return_counts=True)).T  if color in tt]
+            if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
+            else: painted_pixels = painted_pixels[0][1]
+            pixels_to_paint = total_pixels - painted_pixels
+            time_pixelated = float(pixels_to_paint)/874.0 #874 pixels/sec  is the Normal speed of the drawPixel function
+            print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
+            if time_pixelated < time_normal:
+                print "pixelado!"
+                [self.drawPixel(x,y1,color) for y1 in range(y,y+h)]
+
+                #Escribimos en el frame_buffer
+                block = np.full((h,),color)
+                self.frame_buffer[x ,y:y+h] = block
+                return
 
         # set location
         self.writeCommand(self.CMD_SETCOLUMN)
@@ -360,6 +444,11 @@ class SSD1351:
            self.writeData(color >> 8)
            self.writeData(color)
 
+        #Escribimos en el frame_buffer
+        block = np.full((h,),color)
+        self.frame_buffer[x ,y:y+h] = block
+        return
+
 
 # Also necsary for compatibility with the GFX library
     def drawPixel(self, x, y, color):
@@ -371,11 +460,19 @@ class SSD1351:
             return
 
 
-        # set location
-        self.goTo(x, y)
-        #Write the data
-        self.writeData(color >> 8)
-        self.writeData(color)
+        #We check if the pixel is already the color we want
+
+        if self.optimization == True and self.frame_buffer.item((x,y)) == color:
+            return
+        else:
+            # set location
+            self.goTo(x, y)
+            #Write the data
+            self.writeData(color >> 8)
+            self.writeData(color)
+
+            #Now we record the pixel to the frame buffer
+            self.frame_buffer.itemset((x,y),color)
 
 
 
