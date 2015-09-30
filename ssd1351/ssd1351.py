@@ -1,3 +1,5 @@
+ # -*- coding: utf-8 -*-
+
 #----------------------------------------------------------------------
 # ssd1351.py from https://github.com/saidalvarado/ssd1351
 # ported by Said Alvarado
@@ -109,7 +111,7 @@ class SSD1351:
     # We will keep d/c low and bump it high only for commands with data
     # reset is normally HIGH, and pulled LOW to reset the display
 
-    def __init__(self, bus=0, device=0, dc_pin=16, reset_pin=15, rows=128, cols=128):
+    def __init__(self, bus=0, device=0, dc_pin=3, reset_pin=2, rows=128, cols=128):
         # Display size
         self.cols = cols
         self.rows = rows
@@ -128,7 +130,7 @@ class SSD1351:
         self.gpio.setup(self.dc_pin, self.gpio.OUT)
         self.gpio.output(self.dc_pin, self.gpio.LOW)
         # Load de font
-        self.font = glcdfont.font5x8[:]    #We make a copy
+        self.font = np.asarray(glcdfont.font5x8,dtype = np.uint8)    #We make a copy
         self.font_size_x = glcdfont.x_size
         self.font_size_y = glcdfont.y_size
         self.cursor_x = 0
@@ -157,6 +159,7 @@ class SSD1351:
 
         if type(command) != list:
             command = [command]
+
         # DC pin  <-- HIGH
         self.gpio.output(self.dc_pin, self.gpio.HIGH)
         # write data
@@ -308,26 +311,25 @@ class SSD1351:
             w = self.SSD1351WIDTH - x - 1
 
         #Check if optimization is actually convinient
-        if self.optimization:
-            total_pixels = float(w*h)
-            time_normal = total_pixels/597956      #597956 pixels/sec  is the Normal speed of the fillRect function
-            painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x:x+w ,y:y+h],return_counts=True)).T  if fillcolor in tt]
-            if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
-            else: painted_pixels = painted_pixels[0][1]
-            pixels_to_paint = total_pixels - painted_pixels
-            time_pixelated = float(pixels_to_paint)/2501 #874 pixels/sec  is the Normal speed of the drawPixel function
-            print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
-            if time_pixelated < time_normal:
-                print "pixelado!"
-                [self.drawPixel(x1,y1,fillcolor) for x1 in range(x,x+w) for y1 in range(y,y+h)]
+        # if self.optimization:
+        #     total_pixels = float(w*h)
+        #     time_normal = total_pixels/597956      #597956 pixels/sec  is the Normal speed of the fillRect function
+        #     painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x:x+w ,y:y+h],return_counts=True)).T  if fillcolor in tt]
+        #     if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
+        #     else: painted_pixels = painted_pixels[0][1]
+        #     pixels_to_paint = total_pixels - painted_pixels
+        #     time_pixelated = float(pixels_to_paint)/2501 #874 pixels/sec  is the Normal speed of the drawPixel function
+        #     print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
+        #     if time_pixelated < time_normal:
+        #         print "pixelado!"
+        #         [self.drawPixel(x1,y1,fillcolor) for x1 in range(x,x+w) for y1 in range(y,y+h)]
 
-                #Escribimos en el frame_buffer
-                block = np.full((w,h),fillcolor)
-                self.frame_buffer[x:x+w ,y:y+h] = block
-                return
+        #         #Escribimos en el frame_buffer
+        #         block = np.full((w,h),fillcolor)
+        #         self.frame_buffer[x:x+w ,y:y+h] = block
+        #         return
 
 
-        print "normal!"
         # set location
         self.writeCommand(self.CMD_SETCOLUMN)
         self.writeData([x,x+w-1])
@@ -339,13 +341,12 @@ class SSD1351:
         self.writeCommand(self.CMD_WRITERAM)
 
         #We try to get around the limitation of the 4096 buffer size of the spidev module
-        print "transferencias = {}".format(2*w*h)
         if 2*w*h > 4096:
         #With this we split the transfer into a lot of 4096 bytes transfers
             for i in xrange(2*w*h/4096):
                 self.writeData([fillcolor >> 8,fillcolor] * 2048)
-                print"Enviadas 4096 trasnferencias"
-            print"Enviando ultimas {} transferencias".format((((2*w*h)%4096)/2))
+            #     print"Enviadas 4096 trasnferencias"
+            # print"Enviando ultimas {} transferencias".format((((2*w*h)%4096)/2))
             if ((2*w*h)%4096) > 0:
                 #If there is still something to send, send it!
                 self.writeData([fillcolor >> 8,fillcolor] * (((2*w*h)%4096)/2))
@@ -375,23 +376,23 @@ class SSD1351:
 
 
         #Check if optimization is actually convinient
-        if self.optimization:
-            total_pixels = float(w)
-            time_normal = total_pixels/597956       #597956 pixels/sec  is the Normal speed of the fillRect function
-            painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x:x+w ,y],return_counts=True)).T  if color in tt]
-            if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
-            else: painted_pixels = painted_pixels[0][1]
-            pixels_to_paint = total_pixels - painted_pixels
-            time_pixelated = float(pixels_to_paint)/2501 #874 pixels/sec  is the Normal speed of the drawPixel function
-            # print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
-            if time_pixelated < time_normal:
-                print "pixelado!"
-                [self.drawPixel(x1,y,color) for x1 in range(x,x+w)]
+        # if self.optimization:
+        #     total_pixels = float(w)
+        #     time_normal = total_pixels/597956       #597956 pixels/sec  is the Normal speed of the fillRect function
+        #     painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x:x+w ,y],return_counts=True)).T  if color in tt]
+        #     if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
+        #     else: painted_pixels = painted_pixels[0][1]
+        #     pixels_to_paint = total_pixels - painted_pixels
+        #     time_pixelated = float(pixels_to_paint)/2501 #874 pixels/sec  is the Normal speed of the drawPixel function
+        #     # print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
+        #     if time_pixelated < time_normal:
+        #         print "pixelado!"
+        #         [self.drawPixel(x1,y,color) for x1 in range(x,x+w)]
 
-                #Escribimos en el frame_buffer
-                block = np.full((w,),color)
-                self.frame_buffer[x:x+w ,y] = block
-                return
+        #         #Escribimos en el frame_buffer
+        #         block = np.full((w,),color)
+        #         self.frame_buffer[x:x+w ,y] = block
+        #         return
 
         # set location
         self.writeCommand(self.CMD_SETCOLUMN)
@@ -428,23 +429,23 @@ class SSD1351:
             return
 
         #Check if optimization is actually convinient
-        if self.optimization:
-            total_pixels = float(h)
-            time_normal = total_pixels/597956       #3649 pixels/sec  is the Normal speed of the fillRect function
-            painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x,y:y+h],return_counts=True)).T  if color in tt]
-            if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
-            else: painted_pixels = painted_pixels[0][1]
-            pixels_to_paint = total_pixels - painted_pixels
-            time_pixelated = float(pixels_to_paint)/2501 #874 pixels/sec  is the Normal speed of the drawPixel function
-            print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
-            if time_pixelated < time_normal:
-                print "pixelado!"
-                [self.drawPixel(x,y1,color) for y1 in range(y,y+h)]
+        # if self.optimization:
+        #     total_pixels = float(h)
+        #     time_normal = total_pixels/597956       #3649 pixels/sec  is the Normal speed of the fillRect function
+        #     painted_pixels = [tt for tt in np.asarray(np.unique(self.frame_buffer[x,y:y+h],return_counts=True)).T  if color in tt]
+        #     if painted_pixels == []: painted_pixels = 0 #Border case where there are no painted pixels
+        #     else: painted_pixels = painted_pixels[0][1]
+        #     pixels_to_paint = total_pixels - painted_pixels
+        #     time_pixelated = float(pixels_to_paint)/2501 #874 pixels/sec  is the Normal speed of the drawPixel function
+        #     print "fillRect = {}ms,  drawPixel = {}ms for {}pixels totals and {}pixels real".format(time_normal*1000,time_pixelated*1000,total_pixels,pixels_to_paint)
+        #     if time_pixelated < time_normal:
+        #         print "pixelado!"
+        #         [self.drawPixel(x,y1,color) for y1 in range(y,y+h)]
 
-                #Escribimos en el frame_buffer
-                block = np.full((h,),color)
-                self.frame_buffer[x ,y:y+h] = block
-                return
+        #         #Escribimos en el frame_buffer
+        #         block = np.full((h,),color)
+        #         self.frame_buffer[x ,y:y+h] = block
+        #         return
 
         # set location
         self.writeCommand(self.CMD_SETCOLUMN)
@@ -836,21 +837,29 @@ class SSD1351:
             #Convert charater to index
             letter = ord(c) & 0x7F
             if letter < 0: letter = 0
-            # else: letter -= ord(' ')    #La fuente de sparkfunya sabe donde tiene que empezar. 32 es "espacio"
+            # else: letter -= ord(' ')    #The Adafruit font already knows where to start. 32 is "space"
         elif type(c) == int:
             letter = c
         else: return
 
+        #We create a flat list of each color that it's needed to draw the letter.
+        letter_bits = np.unpackbits(np.asarray(np.append(self.font[letter],[0]),dtype = np.uint8) )
+        letter_bits = np.asarray(map(lambda x:(bg,color)[x == 1], letter_bits) ,dtype = np.uint16) #We change the bit array to a color/background array
+        letter_array = np.flipud(np.reshape(letter_bits,(6,8)).T) #Reorient the array
 
-        for j in xrange(self.font_size_x + 1):    #The adafruit glcd font only stores 5 of the 6 columns of the fonts. to save space.
-            for i in xrange(self.font_size_y):
-                if (j < self.font_size_x):  line = self.font[letter][j]
-                else: line = 0x00 #This is the separator between the characters
-                if ( line & (0x01 << i) != 0 ):
-                    self.drawPixel(x+j,y+i,color)
-                elif bg == None: continue
-                else:
-                    self.drawPixel(x+j,y+i,bg)
+        # We draw the letter as a bitmap
+        self.drawBitmap(letter_array,x,y)
+
+
+        # for j in xrange(self.font_size_x + 1):    #The adafruit glcd font only stores 5 of the 6 columns of the fonts. to save space.
+        #     for i in xrange(self.font_size_y):
+        #         if (j < self.font_size_x):  line = self.font[letter][j]
+        #         else: line = 0x00 #This is the separator between the characters
+        #         if ( line & (0x01 << i) != 0 ):
+        #             self.drawPixel(x+j,y+i,color)
+        #         elif bg == None: continue
+        #         else:
+        #             self.drawPixel(x+j,y+i,bg)
 
 
 #Function for writing strings of text
@@ -861,6 +870,8 @@ class SSD1351:
                 self.cursor_x = 0
                 self.cursor_y += 1
             else:
+                if c == '°':  c = [247]               #Font number for the little degree circle
+
                 self.drawChar(self.cursor_x * (self.font_size_x + 1) , self.cursor_y * self.font_size_y, c, color,bg )
                 self.cursor_x += 1
                 if self.cursor_x * (self.font_size_x + 1) > self.SSD1351WIDTH - (self.font_size_x + 1):
@@ -875,7 +886,34 @@ class SSD1351:
 
 
 
+#Draw bitmap (the bitmap is a numpy array)
+    def drawBitmap(self, bitmap, x, y):
 
 
 
+        w = bitmap.shape[1]
+        h = bitmap.shape[0]
+
+        flat_bitmap = [int(item) for sublist in bitmap for item in sublist]
+        # flat_bitmap = [int(i) for i in flat_bitmap]
+        flat_bitmap2 = [[i >> 8, i] for i in flat_bitmap]
+        flat_bitmap3 = [item for sublist in flat_bitmap2 for item in sublist]
+
+
+        # print flat_bitmap
+        # print ("flat_bitmap = {}".format(len(flat_bitmap)))
+
+
+        # set location
+        self.writeCommand(self.CMD_SETCOLUMN)
+        self.writeData([x,x+w-1])
+        # self.writeData(x+w-1)
+        self.writeCommand(self.CMD_SETROW)
+        self.writeData([y,y+h-1])
+        # self.writeData(y+h-1)
+        # fill!
+        self.writeCommand(self.CMD_WRITERAM)
+
+        #Write the bitmap
+        self.writeData(flat_bitmap3)
 
