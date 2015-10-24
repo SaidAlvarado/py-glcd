@@ -11,6 +11,9 @@
 #   https://github.com/adafruit/Adafruit-SSD1351-library
 # written by Limor Fried/Ladyada for Adafruit Industries.
 #
+# And also adapted from de py-gaugette library for python
+#   https://github.com/guyc/py-gaugette
+#
 # Some important things to know about this device and SPI:
 #
 # SPI and GPIO calls are made through an abstraction library that calls
@@ -19,7 +22,7 @@
 #     wiring2
 #     spidev
 #
-# Presently untested / not supported for BBBlack
+# It requires  Numpy (version >= 1.92) to speed up some of the image processing
 #
 #----------------------------------------------------------------------
 
@@ -66,6 +69,19 @@ class SSD1351:
     # DELAYS_HWFILL = 3
     # DELAYS_HWLINE = 1
 
+    # Colors
+    BLACK         =  0x0000
+    BLUE          =  0x001F
+    RED           =  0xF800
+    GREEN         =  0x07E0
+    CYAN          =  0x07FF
+    MAGENTA       =  0xF81F
+    YELLOW        =  0xFFE0
+    WHITE         =  0xFFFF
+
+
+
+
     # SSD1351 Commands
     CMD_SETCOLUMN          = 0x15
     CMD_SETROW             = 0x75
@@ -111,7 +127,7 @@ class SSD1351:
     # We will keep d/c low and bump it high only for commands with data
     # reset is normally HIGH, and pulled LOW to reset the display
 
-    def __init__(self, bus=0, device=0, dc_pin=3, reset_pin=2, rows=128, cols=128):
+    def __init__(self, bus=0, device=0, dc_pin=3, reset_pin=2, rows=128, cols=128, spiBufferSize = 4096):
         # Display size
         self.cols = cols
         self.rows = rows
@@ -123,6 +139,7 @@ class SSD1351:
         self.spi.open(bus, device)
         self.spi.max_speed_hz = 16000000 #We set the bus to 16Mhz
         self.spi.mode = 3 # necessary!
+        self.spi_buffer_size = spiBufferSize
         # GPIO port configuration. (The defition is at the start of the code)
         self.gpio = GPIO()
         self.gpio.setup(self.reset_pin, self.gpio.OUT)
@@ -136,7 +153,7 @@ class SSD1351:
         self.cursor_x = 0
         self.cursor_y = 0
         #Frame buffer for speed optimization
-        self.frame_buffer = np.full((128,128),0,dtype=np.uint16)
+        self.frame_buffer = np.full((rows,cols),0,dtype=np.uint16)
         #Toogle switch for speed optimization
         self.optimization = False #Becomes True in the begin() function
 
@@ -244,6 +261,21 @@ class SSD1351:
 
     #Invert the display... whatever that means.
     def invert(self, v):   # v is a boolean
+        """ Inverts the current colors displayed on the screen
+
+
+        Parameters
+        ----------
+        v : boolean.
+            TRUE  =>  Colors are inverted
+            FALSE =>  Colors are displayed normally
+
+        Returns
+        --------
+        Nothing
+
+        """
+
 
         if v == True:
             self.writeCommand(self.CMD_INVERTDISPLAY)
@@ -268,6 +300,23 @@ class SSD1351:
 
 
     def goTo(self, x, y):
+        """ ***NOT PART OF THE API***
+            moves the internal cursor of the screen to a certain position
+
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate.
+
+        y : uint8.
+            Vertical coordinate.
+
+        Returns
+        --------
+        Nothing
+
+        """
         if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
             return
 
@@ -285,6 +334,22 @@ class SSD1351:
 
 
     def color565(self, (colorRGB)): # ints
+        """ Converts a three-tuple representing an (RGB) color to a 16bit unsigned int representing
+            such color
+
+
+        Parameters
+        ----------
+        coloresRGB: three-tuple.
+                    Tuple of colors (R,G,B) to be converted to a 16bits uint representation
+                    5 bits red, 6 bits greenn y 5 bits blue.
+
+        Returns
+        --------
+        c : uint16
+            RGB color represented as an uint16, ready for the drawing functions.
+
+        """
         r,g,b = colorRGB
         c = r >> 3
         c <<= 6
@@ -295,11 +360,53 @@ class SSD1351:
 
 
     def fillScreen(self, fillcolor): # int
+        """ Colors the entire screen with "fillcolor"
+
+
+        Parameters
+        ----------
+        fillcolor: uint16.
+                   integer representing a 16bit color (e.g. 0xF800), the entire screen
+                   gets painted with it.
+
+        Returns
+        --------
+        Nothing
+
+        """
+
         self.fillRect(0, 0, self.SSD1351WIDTH, self.SSD1351HEIGHT, fillcolor)
 
 
 ## We are ignoring de rotation support, meybe i will add later. if this actually works
     def fillRect(self, x, y, w, h, fillcolor):
+        """ Draws a solid rectangle anywhere on the screen.
+
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate of the top-left corner of the rectangle, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the top-left corner of the rectangle, in pixels.
+
+        w : uint8.
+            Widht of the rectangle, in pixels
+
+        h : uint8.
+            Height of the rectangle, in pixels
+
+        fillcolor : uint16.
+            Color of the rectangle, represented as a 16bit integer (e.g. 0xF800).
+
+        Returns
+        --------
+        Nothing
+
+        """
+
+
         # Bounds check
         if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
             return
@@ -341,15 +448,15 @@ class SSD1351:
         self.writeCommand(self.CMD_WRITERAM)
 
         #We try to get around the limitation of the 4096 buffer size of the spidev module
-        if 2*w*h > 4096:
+        if 2*w*h > self.spi_buffer_size:
         #With this we split the transfer into a lot of 4096 bytes transfers
-            for i in xrange(2*w*h/4096):
-                self.writeData([fillcolor >> 8,fillcolor] * 2048)
+            for i in xrange(2*w*h/self.spi_buffer_size):
+                self.writeData([fillcolor >> 8,fillcolor] * (self.spi_buffer_size/2))
             #     print"Enviadas 4096 trasnferencias"
             # print"Enviando ultimas {} transferencias".format((((2*w*h)%4096)/2))
-            if ((2*w*h)%4096) > 0:
+            if ((2*w*h)%self.spi_buffer_size) > 0:
                 #If there is still something to send, send it!
-                self.writeData([fillcolor >> 8,fillcolor] * (((2*w*h)%4096)/2))
+                self.writeData([fillcolor >> 8,fillcolor] * (((2*w*h)%self.spi_buffer_size)/2))
         else:
             self.writeData([fillcolor >> 8,fillcolor] * w*h)
         # for i in xrange(w*h):                                ##### Quizas se puede mejorar con un map
@@ -364,6 +471,29 @@ class SSD1351:
 
 #This is necesary for the suppor with de GFX library
     def drawFastHLine(self, x, y, w, color):
+        """ Draws an horizontal line on the screen, taking full advantage of any
+            acceleration provided by the screen's driver chip.
+
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate of the leftmost point of the line, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the leftmost point of the line, in pixels.
+
+        w : uint8.
+            Widht of the rectangle, in pixels
+
+        color : uint16.
+            Color of the line, represented as a 16bit integer (e.g. 0xF800).
+
+        Returns
+        --------
+        Nothing
+
+        """
         # Bounds check
         if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
             return
@@ -418,6 +548,31 @@ class SSD1351:
 
 #This is also necesary for the support of the GFX libray
     def drawFastVLine(self, x, y, h, color):
+        """ Draws a vertical line on the screen, taking full advantage of any
+            acceleration provided by the screen's driver chip.
+
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate of the topmost point of the line, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the topmost point of the line, in pixels.
+
+        h : uint8.
+            Height of the rectangle, in pixels
+
+        color : uint16.
+            Color of the line, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
+
         # Bounds check
         if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
             return
@@ -470,6 +625,28 @@ class SSD1351:
 
 # Also necsary for compatibility with the GFX library
     def drawPixel(self, x, y, color):
+        """ Paints a single pixel on the screen
+
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate pixel, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the pixel, in pixels.
+
+        color : uint16.
+            Color of the pixel, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
+
+
         # Bounds check
         if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
             return
@@ -525,6 +702,29 @@ class SSD1351:
 
     # Draw a circle outline
     def drawCircle(self, x0, y0, r, color):
+        """ Draws a hollow circle on the screen.
+
+
+        Parameters
+        ----------
+        x0 : uint8.
+            Horizontal coordinate of the center of the circle, in pixels.
+
+        y0 : uint8.
+            Vertical coordinate of the center of the circle, in pixels.
+
+        r : uint8.
+            Radius of the circle, in pixels.
+
+        color : uint16.
+            Color of the cicle's perimeter, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
 
         f = 1 - r
         ddF_x = 1
@@ -559,7 +759,33 @@ class SSD1351:
 
 
     def drawCircleHelper(self, x0, y0, r, cornername, color):
+        """ *NOT PART OF THE API*
+            Auxiliary function to draw circles a rounded rectangles
 
+
+        Parameters
+        ----------
+        x0 : uint8.
+            Horizontal coordinate of the center of the circle, in pixels.
+
+        y0 : uint8.
+            Vertical coordinate of the center of the circle, in pixels.
+
+        r : uint8.
+            Radius of the circle, in pixels.
+
+        cornername : ???
+            ???
+
+        color : uint16.
+            Color of the cicle's perimeter, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         f     = 1 - r
         ddF_x = 1
         ddF_y = -2 * r
@@ -597,7 +823,36 @@ class SSD1351:
 
     # Used to do circles and roundrects
     def fillCircleHelper(self, x0, y0, r, cornername, delta, color):
+        """ *NOT PART OF THE API*
+            Auxiliary function to draw circles a rounded rectangles
 
+
+        Parameters
+        ----------
+        x0 : uint8.
+            Horizontal coordinate of the center of the circle, in pixels.
+
+        y0 : uint8.
+            Vertical coordinate of the center of the circle, in pixels.
+
+        r : uint8.
+            Radius of the circle, in pixels.
+
+        cornername : ???
+            ???
+
+        delta : ???
+            ???
+
+        color : uint16.
+            Color of the cicle's perimeter, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         f     = 1 - r
         ddF_x = 1
         ddF_y = -2 * r
@@ -625,17 +880,72 @@ class SSD1351:
 
 
     def fillCircle(self, x0, y0, r, color):
+        """ Draws a solid circle on the screen.
+
+
+        Parameters
+        ----------
+        x0 : uint8.
+            Horizontal coordinate of the center of the circle, in pixels.
+
+        y0 : uint8.
+            Vertical coordinate of the center of the circle, in pixels.
+
+        r : uint8.
+            Radius of the circle, in pixels.
+
+        color : uint16.
+            Color of the cicle, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
 
         self.drawFastVLine(x0, y0-r, 2*r+1, color)
         self.fillCircleHelper(x0, y0, r, 3, 0, color)
 
+
     #We define the swap Macro
     def swap(self, x,y):
+        """ *NOT PART OF THE API*
+            small helper function
+        """
         return y,x
 
 
     # Bresenham's algorithm - thx wikpedia
     def drawLine(self, x0, y0, x1, y1, color):
+        """ Draws a line on the screen by connecting two specified points.
+            can be horizontal, vertical or diagonal.
+
+
+        Parameters
+        ----------
+        x0 : uint8.
+            Horizontal coordinate of the first point of the line, in pixels.
+
+        y0 : uint8.
+            Vertical coordinate of the first point of the line, in pixels.
+
+        x1 : uint8.
+            Horizontal coordinate of the second point of the line, in pixels.
+
+        y1 : uint8.
+            Vertical coordinate of the second point of the line, in pixels.
+
+        color : uint16.
+            Color of the line, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
+
 
         steep = abs(y1 - y0) > abs(x1 - x0)
 
@@ -672,7 +982,32 @@ class SSD1351:
 
 #Draws empty rectangles
     def drawRect(self, x, y, w, h,color):
+        """ Draws an empty rectangle anywhere on the screen.
 
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate of the top-left corner of the rectangle, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the top-left corner of the rectangle, in pixels.
+
+        w : uint8.
+            Widht of the rectangle, in pixels
+
+        h : uint8.
+            Height of the rectangle, in pixels
+
+        color : uint16.
+            Color of the rectangle's perimeter, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         self.drawFastHLine(x, y, w, color)
         self.drawFastHLine(x, y+h-1, w, color)
         self.drawFastVLine(x, y, h, color)
@@ -680,6 +1015,35 @@ class SSD1351:
 
 # Draw a rounded rectangle
     def drawRoundRect(self, x, y, w, h, r, color):
+        """ Draws an empty rectangle with rounded corners anywhere on the screen.
+
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate of the top-left corner of the rectangle, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the top-left corner of the rectangle, in pixels.
+
+        w : uint8.
+            Widht of the rectangle, in pixels
+
+        h : uint8.
+            Height of the rectangle, in pixels
+
+        r : uint8.
+            Radius of the rounded corner, in pixels
+
+        color : uint16.
+            Color of the rectangle's perimeter, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         #  smarter version
         self.drawFastHLine(x+r  , y    , w-2*r, color) #  Top
         self.drawFastHLine(x+r  , y+h-1, w-2*r, color) #  Bottom
@@ -694,6 +1058,35 @@ class SSD1351:
 
 # Fill a rounded rectangle
     def fillRoundRect(self, x, y, w, h, r, color):
+         """ Draws a solid rectangle with rounded corners anywhere on the screen.
+
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate of the top-left corner of the rectangle, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the top-left corner of the rectangle, in pixels.
+
+        w : uint8.
+            Widht of the rectangle, in pixels
+
+        h : uint8.
+            Height of the rectangle, in pixels
+
+        r : uint8.
+            Radius of the rounded corner, in pixels
+
+        color : uint16.
+            Color of the rectangle, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         #  smarter version
         self.fillRect(x+r, y, w-2*r, h, color)
 
@@ -704,7 +1097,38 @@ class SSD1351:
 
 #  Draw a triangle
     def drawTriangle(self, x0, y0, x1, y1, x2, y2, color):
+         """ Draws an empty triangle, especified by three points, anywhere on the screen.
 
+
+        Parameters
+        ----------
+        x0 : uint8.
+            Horizontal coordinate of the first point of the triangle, in pixels.
+
+        y0 : uint8.
+            Vertical coordinate of the first point of the triangle, in pixels.
+
+        x1 : uint8.
+            Horizontal coordinate of the second point of the triangle, in pixels.
+
+        y1 : uint8.
+            Vertical coordinate of the second point of the triangle, in pixels.
+
+        x2 : uint8.
+            Horizontal coordinate of the thrid point of the triangle, in pixels.
+
+        y2 : uint8.
+            Vertical coordinate of the thrid point of the triangle, in pixels.
+
+        color : uint16.
+            Color of the triangle's perimeter, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         self.drawLine(x0, y0, x1, y1, color)
         self.drawLine(x1, y1, x2, y2, color)
         self.drawLine(x2, y2, x0, y0, color)
@@ -713,7 +1137,38 @@ class SSD1351:
 
 #  Fill a triangle
     def fillTriangle (self, x0, y0, x1, y1, x2, y2, color):
+         """ Draws a solid triangle, especified by three points, anywhere on the screen.
 
+
+        Parameters
+        ----------
+        x0 : uint8.
+            Horizontal coordinate of the first point of the triangle, in pixels.
+
+        y0 : uint8.
+            Vertical coordinate of the first point of the triangle, in pixels.
+
+        x1 : uint8.
+            Horizontal coordinate of the second point of the triangle, in pixels.
+
+        y1 : uint8.
+            Vertical coordinate of the second point of the triangle, in pixels.
+
+        x2 : uint8.
+            Horizontal coordinate of the thrid point of the triangle, in pixels.
+
+        y2 : uint8.
+            Vertical coordinate of the thrid point of the triangle, in pixels.
+
+        color : uint16.
+            Color of the triangle, represented as a 16bit integer (e.g. 0xF800).
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         a = 0
         b = 0
         y = 0
@@ -814,7 +1269,24 @@ class SSD1351:
 #### Aqui empiezan las funciones de escritura! ###
 
     def setCursor(self, x, y):
+         """ Sets de writing cursor of the screen to a certan position, all subsequent calls
+            to the write() fucntion will print it's characters starting at that position
 
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal position of the cursor, accepted values are from 0 to 21.
+
+        y : uint8.
+            Vertical position of the cursor, accepted values are from 0 to 16.
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         #Bound check
         if (x > self.SSD1351WIDTH/self.font_size_x): x = int(x > self.SSD1351WIDTH/self.font_size_x - 1)
         if (y > self.SSD1351HEIGHT/self.font_size_y): y = int(x > self.SSD1351HEIGHT/self.font_size_y - 1)
@@ -823,12 +1295,57 @@ class SSD1351:
         self.cursor_y = y
 
     def getCursor(self):
+         """ Returns the current position of the writing cursor
+
+
+        Parameters
+        ----------
+        Nothing
+
+
+        Returns
+        --------
+        out : two-tuple.
+            Tuple with (X,Y) with the current position of the writing cursor.
+
+        """
         return (self.cursor_x, self.cursor_y)
 
 
 #It still doesn't support variable size letters
     def drawChar(self, x, y, c,  color= 0xffff, bg = 0x0000,  size = 1):
+         """ Prints an 6x8 ASCII character anywhere on the screen, as defined by the font on "glcdfont.py"
 
+
+        Parameters
+        ----------
+        x : uint8.
+            Horizontal coordinate of the top-left corner of the 6x8 character, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the top-left corner of the 6x8 character, in pixels.
+
+        c : char, uint8.
+            Character to print, may also be a number from 0 to 254 if you want to directly
+            reference the font array.
+
+        color : uint16.
+            Color of the pixels needed to draw the charater, represented as a 16bit integer (e.g. 0xF800).
+            default => WHITE
+
+        bg : uint16.
+            Color of the pixels intended as bachground to the charater, represented as a 16bit integer (e.g. 0xF800).
+            default => BLACK
+
+        size : uint8.
+            Scaling factor for the size of the font. *NOT IMPLEMENTED*
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         #Bounds check
         if ((x >= self.SSD1351WIDTH) or (y >= self.SSD1351HEIGHT) or ((x + (self.font_size_x + 1) * size - 1) < 0) or ((y + self.font_size_y * size - 1) < 0)):
             return
@@ -846,25 +1363,49 @@ class SSD1351:
         letter_bits = np.unpackbits(np.asarray(np.append(self.font[letter],[0]),dtype = np.uint8) )
         letter_bits = np.asarray(map(lambda x:(bg,color)[x == 1], letter_bits) ,dtype = np.uint16) #We change the bit array to a color/background array
         letter_array = np.flipud(np.reshape(letter_bits,(6,8)).T) #Reorient the array
-
-        # We draw the letter as a bitmap
         self.drawBitmap(letter_array,x,y)
-
 
         # for j in xrange(self.font_size_x + 1):    #The adafruit glcd font only stores 5 of the 6 columns of the fonts. to save space.
         #     for i in xrange(self.font_size_y):
         #         if (j < self.font_size_x):  line = self.font[letter][j]
         #         else: line = 0x00 #This is the separator between the characters
         #         if ( line & (0x01 << i) != 0 ):
-        #             self.drawPixel(x+j,y+i,color)
+        #             self.drawPixelFB(x+j,y+i,color)
         #         elif bg == None: continue
         #         else:
-        #             self.drawPixel(x+j,y+i,bg)
+        #             self.drawPixelFB(x+j,y+i,bg)
+
+
 
 
 #Function for writing strings of text
     def write(self, text, color= 0xffff, bg = 0x0000 ):
+        """ Prints an string on the screen on the current position of the writing cursor.
+            the writing cursor self actualizes and automatically wraps the text.
+            '\n' charater is supported.
+            uses the 6x8 font defined  on "glcdfont.py"
 
+
+        Parameters
+        ----------
+        text : string, list of ints.
+            String to be printed on the screen, may also be a list of integers representing positions
+            on the font array.
+
+        color : uint16.
+            Color of the pixels needed to draw the charater, represented as a 16bit integer (e.g. 0xF800).
+            default => WHITE
+
+        bg : uint16.
+            Color of the pixels intended as bachground to the charater, represented as a 16bit integer (e.g. 0xF800).
+            default => BLACK
+
+
+        Returns
+        --------
+        Nothing
+
+        """
         for c in text:
             if c == '\n':
                 self.cursor_x = 0
@@ -884,36 +1425,178 @@ class SSD1351:
                         self.cursor_x = 0
                         self.cursor_y = 0
 
+        # # We draw the letter as a bitmap
+        # print "almost in"
+        # self.drawBitmap(self.frame_buffer[init_y*self.font_size_y:(self.cursor_y + 1)*self.font_size_y,init_x*self.font_size_x:(self.cursor_x + 1)*self.font_size_x], init_y*self.font_size_y, init_x*self.font_size_x)
+        # print "out!"
 
 
 #Draw bitmap (the bitmap is a numpy array)
     def drawBitmap(self, bitmap, x, y):
+        """ Draws an image to the screen. The image must be a two-dimensional numpy array with each
+        element being a 16bit color integer(NOT an RGB tuple).
+
+        NOTE: if the image is too big for the screen, or positioned in such a way that it doesn't fit the
+        screen. Nothing will be displayed, the function will just return.
+
+
+        Parameters
+        ----------
+        bitmap : 2-dimensional ndarray.
+            image to be drawn on the screen
+
+        x : uint8.
+            Horizontal coordinate of the top-left corner of the image, in pixels.
+
+        y : uint8.
+            Vertical coordinate of the top-left corner of the image, in pixels.
+
+
+        Returns
+        --------
+        Nothing
+
+        """
 
 
 
         w = bitmap.shape[1]
         h = bitmap.shape[0]
 
+        # Bounds check
+        if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
+            return
+
+        if y+h > self.SSD1351HEIGHT:
+            return
+
+        if x+w > self.SSD1351WIDTH:
+            return
+
+
+        # If the image is not transformed to 16bits color
+        if len(bitmap.shape) == 3:
+            return
+            # bitmap565 = np.zeros_like(bitmap[:,:,0],dtype=np.uint16)
+            # for j in range(bitmap.shape[0]):
+            #     for k in range(bitmap.shape[1]):
+            #         bitmap565.itemset((j,k), self.color565(bitmap[j][k]))
+            # # Transform the array into a list
+            # bitmap = [ list(z) for z in bitmap565]
+
+
         flat_bitmap = [int(item) for sublist in bitmap for item in sublist]
         # flat_bitmap = [int(i) for i in flat_bitmap]
         flat_bitmap2 = [[i >> 8, i] for i in flat_bitmap]
         flat_bitmap3 = [item for sublist in flat_bitmap2 for item in sublist]
-
-
-        # print flat_bitmap
-        # print ("flat_bitmap = {}".format(len(flat_bitmap)))
-
 
         # set location
         self.writeCommand(self.CMD_SETCOLUMN)
         self.writeData([x,x+w-1])
         # self.writeData(x+w-1)
         self.writeCommand(self.CMD_SETROW)
+
         self.writeData([y,y+h-1])
         # self.writeData(y+h-1)
         # fill!
         self.writeCommand(self.CMD_WRITERAM)
 
         #Write the bitmap
-        self.writeData(flat_bitmap3)
+        #We try to get around the 4096 buffer size limitation
+        if len(flat_bitmap3) > self.spi_buffer_size:
+        #With this we split the transfer into a lot of 4096 bytes transfers
+            bloques = len(flat_bitmap3)/self.spi_buffer_size
+            sobrante = len(flat_bitmap3)%self.spi_buffer_size
+            # Splitting guide for the array
+            split_guide = [ (i+1)*self.spi_buffer_size for i in xrange(bloques)]
+            # We add the the last division
+            split_guide = split_guide + [split_guide[-1]+sobrante]
+            for block in np.split(np.asarray(flat_bitmap3),split_guide):
+                if len(block) > 0:
+                    self.writeData(list(block))
+            return
 
+        self.writeData(flat_bitmap3)
+        # self.frame_buffer[y:y+h,x:x+w] = bitmap
+
+
+# Pretransform bitmaps to 16bit arrays
+    def convertBitmap565(self,bitmap):
+        """ Converts a Numpy array representing an image with RGB tuples, to a numpy array
+        representing an image with 16bits integer coded colors. The returned array may be passed
+        to the "drawBitmap() function.
+
+
+        Parameters
+        ----------
+        bitmap : image ndarray.
+            Image to be converted from (RGB) tuples to 16bit color
+
+        Returns
+        --------
+        out : 16bit color image ndarray.
+            Image converted to 16bit color
+
+        """
+        # If the image is not transformed to 16bits color
+        if len(bitmap.shape) == 3:
+            bitmap565 = np.zeros_like(bitmap[:,:,0],dtype=np.uint16)
+            for j in range(bitmap.shape[0]):
+                for k in range(bitmap.shape[1]):
+                    bitmap565.itemset((j,k), self.color565(bitmap[j][k]))
+
+        return bitmap565
+
+
+#########################################################################################################################
+######                               FRAMEBUFFER OPTIMIZATION                                                      ######
+#########################################################################################################################
+
+#This is necesary for the suppor with de GFX library
+    def drawFastHLineFB(self, x, y, w, color):
+        # Bounds check
+        if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
+            return
+
+        # X bounds check
+        if x+w > self.SSD1351WIDTH:
+            w = self.SSD1351WIDTH - x - 1
+        if w < 0:
+            return
+
+        self.frame_buffer[x:x+w ,y] = color
+        return
+
+
+#This is also necesary for the support of the GFX libray
+    def drawFastVLineFB(self, x, y, h, color):
+        # Bounds check
+        if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
+            return
+
+        # X bounds check
+        if y+h > self.SSD1351HEIGHT:
+            h = self.SSD1351HEIGHT - y - 1
+        if h < 0:
+            return
+
+        #Write the frame_buffer
+        self.frame_buffer[x ,y:y+h] = color
+        return
+
+
+# Also necsary for compatibility with the GFX library
+    def drawPixelFB(self, x, y, color):
+        # Bounds check
+        if x >= self.SSD1351WIDTH or y >= self.SSD1351HEIGHT:
+            return
+
+        if x < 0 or y < 0:
+            return
+
+
+        #We check if the pixel is already the color we want
+
+        if self.frame_buffer.item((y,x)) != color:
+            #Now we record the pixel to the frame buffer
+            self.frame_buffer.itemset((y,x),color)
