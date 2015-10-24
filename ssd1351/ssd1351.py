@@ -1058,7 +1058,7 @@ class SSD1351:
 
 # Fill a rounded rectangle
     def fillRoundRect(self, x, y, w, h, r, color):
-         """ Draws a solid rectangle with rounded corners anywhere on the screen.
+        """ Draws a solid rectangle with rounded corners anywhere on the screen.
 
 
         Parameters
@@ -1097,7 +1097,7 @@ class SSD1351:
 
 #  Draw a triangle
     def drawTriangle(self, x0, y0, x1, y1, x2, y2, color):
-         """ Draws an empty triangle, especified by three points, anywhere on the screen.
+        """ Draws an empty triangle, especified by three points, anywhere on the screen.
 
 
         Parameters
@@ -1137,7 +1137,7 @@ class SSD1351:
 
 #  Fill a triangle
     def fillTriangle (self, x0, y0, x1, y1, x2, y2, color):
-         """ Draws a solid triangle, especified by three points, anywhere on the screen.
+        """ Draws a solid triangle, especified by three points, anywhere on the screen.
 
 
         Parameters
@@ -1269,7 +1269,7 @@ class SSD1351:
 #### Aqui empiezan las funciones de escritura! ###
 
     def setCursor(self, x, y):
-         """ Sets de writing cursor of the screen to a certan position, all subsequent calls
+        """ Sets de writing cursor of the screen to a certan position, all subsequent calls
             to the write() fucntion will print it's characters starting at that position
 
 
@@ -1295,7 +1295,7 @@ class SSD1351:
         self.cursor_y = y
 
     def getCursor(self):
-         """ Returns the current position of the writing cursor
+        """ Returns the current position of the writing cursor
 
 
         Parameters
@@ -1314,7 +1314,7 @@ class SSD1351:
 
 #It still doesn't support variable size letters
     def drawChar(self, x, y, c,  color= 0xffff, bg = 0x0000,  size = 1):
-         """ Prints an 6x8 ASCII character anywhere on the screen, as defined by the font on "glcdfont.py"
+        """ Prints an 6x8 ASCII character anywhere on the screen, as defined by the font on "glcdfont.py"
 
 
         Parameters
